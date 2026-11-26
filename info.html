@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Tienda | Inicio</title>
+    <meta name="description" content="Descripción corta de mi proyecto, máximo 150 caracteres.">
+    <link rel="icon" href="Imagenes/logo-provisional.png">
+    <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+  <header><img src="Imagenes\logo-provisional.png" alt="logo-provisional" width="200"><h1>The Last Chapter</h1></header>
+<nav>
+  <a href="index2.html">Inicio</a> |
+  <a href="info.html">Información</a> |
+  <a href="demo.html">Demo</a> |
+  <a href="contacto.html">Contacto</a> |
+  <a href="moreabout.html">Más sobre nosotros</a>
+</nav>
+<section>
+    <h2>Mi tienda</h2>
+    <input type="text" id="campoBuscar" placeholder="Buscar producto">
+    <select id="selCategoria">
+        <option value="todas">Todas las categorías</option>
+        <option value="cap1">Capítulo 1</option>
+        <option value="cap2">Capítulo 2</option>
+        <option value="cap3">Capítulo 3</option>
+        <option value="cap4">Capítulo 4</option>
+        <option value="cap5">Capítulo 5</option>
+    </select>
+    <button id="btnFiltrar">Buscar</button>
+    <ul id="listaProductos"></ul>
+
+    <h3>Mi carrito</h3>
+    <p id="textoCarrito">El carrito está vacío.</p>
+    <button id="btnVaciar">Vaciar carrito</button>
+    <button id="btnComprar">Finalizar compra</button>
+<p id="mensajeCompra"></p>
+</section>
+<script src="script.js"></script>
+</body>
+</html> 

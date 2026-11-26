@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<!-- THE LAST CHAPTER - Villamar Guevara Iker Adriel - ISPADE - Fundamentos de Programación I - Docente: Ing. José Luis Enríquez -->
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>THE LAST CHAPTER</title>
+<style>
+/* ===== CSS: aspecto de la interfaz (menús, inventario, mensajes) ===== */
+*{box-sizing:border-box;user-select:none;-webkit-user-select:none}
+html,body{margin:0;height:100%;background:#000;color:#cfc8b8;font-family:"Courier New",monospace;overflow:hidden}
+#c{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(100vw,177.78vh);image-rendering:pixelated;background:#000}
+#scan{position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 1px,transparent 1px 3px)}
+#ui{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.8);text-align:center;padding:12px;overflow:auto}
+#ui.on{display:flex}
+h1{font-size:clamp(28px,7vw,64px);letter-spacing:6px;margin:6px;color:#b32020;text-shadow:0 0 14px #500}
+h2{letter-spacing:4px;margin:4px;color:#9a9484}
+p{max-width:560px;line-height:1.5}.q{font-style:italic;color:#7a7568}
+button{font:inherit;background:#0b0b0d;color:#cfc8b8;border:1px solid #5a1a1a;padding:10px 20px;margin:4px;min-width:250px;cursor:pointer;letter-spacing:2px}
+button:hover:not(:disabled){background:#3a0d0d;color:#fff}button:disabled{opacity:.35}
+.cards{display:flex;flex-wrap:wrap;justify-content:center}.card{width:210px;margin:6px;border:1px solid #3a2a2a;padding:8px;background:#0a0a0c;font-size:13px}
+.img{height:70px;margin-bottom:6px;display:flex;align-items:center;justify-content:center;font-size:30px;color:#6a1a1a}
+.pad button{min-width:64px;width:64px;margin:3px}#kd{font-size:32px;letter-spacing:10px;margin:8px;color:#d33}
+#msg{position:fixed;left:50%;bottom:62px;transform:translateX(-50%);max-width:90vw;width:620px;text-align:center;background:rgba(0,0,0,.75);padding:8px 12px;border-top:1px solid #4a1a1a;opacity:0;transition:opacity .4s;pointer-events:none;font-size:14px}
+#prompt{position:fixed;left:50%;top:62%;transform:translateX(-50%);display:none;color:#e8dca0;letter-spacing:2px;font-size:14px;background:rgba(0,0,0,.6);padding:4px 10px}
+#inv{position:fixed;left:0;right:0;bottom:0;height:44px;display:none;align-items:center;gap:8px;padding:0 10px;background:rgba(0,0,0,.85);border-top:1px solid #3a1a1a;font-size:12px;overflow-x:auto;white-space:nowrap}
+#inv span{border:1px solid #5a4a3a;padding:4px 8px;cursor:pointer;color:#e8dca0}
+#touch{position:fixed;left:0;right:0;bottom:50px;display:none;justify-content:space-between;padding:0 10px;pointer-events:none}
+#touch div{pointer-events:auto}.tb{display:inline-block;width:52px;height:52px;line-height:52px;margin:2px;text-align:center;background:rgba(80,80,80,.35);border:1px solid #666;font-size:20px}
+</style></head><body>
+<!-- ===== HTML: lienzo (canvas) donde se dibuja el juego + capas de interfaz ===== -->
+<canvas id="c" width="384" height="216"></canvas>
+<div id="scan"></div><div id="msg"></div><div id="prompt">PRESIONA E PARA INTERACTUAR</div>
+<div id="inv"></div><div id="touch"><div id="tl"></div><div id="tr"></div></div><div id="ui"></div>
+<script>
+/* ===== 1. CONSTANTES: tamaños fijos que nunca cambian ===== */
+const W=384,H=216,T=16,MW=40,MH=22;           // ancho/alto del lienzo, tamaño de baldosa, tamaño del mapa (en baldosas)
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const dk=document.createElement('canvas');dk.width=W;dk.height=H;const dctx=dk.getContext('2d'); // capa de oscuridad
+const $=id=>document.getElementById(id);
+
+/* ===== 2. OBJETOS DEL JUEGO: un objeto JS por cada cosa que se puede recoger ===== */
+const IT={
+ linterna:{n:'Linterna',d:'Ilumina la oscuridad. Con ella puedes ver cosas ocultas.'},
+ llave:{n:'Llave oxidada',d:'Abre la puerta de la habitación. Tiene grabado un 4.'},
+ nota:{n:'Nota misteriosa',d:'"NO DEBISTE REGRESAR. El código es la fecha de la foto: día y mes."'},
+ foto:{n:'Fotografía antigua',d:'Tres niños frente al edificio. En el reverso: 14 / 03 / 1987.'},
+ cinta:{n:'Cinta de audio',d:'Una voz: "Si escuchas esto, ya estás dentro. Escucha a las voces: ellas saben el camino."'},
+ f1:{n:'Susurro 1',d:'Una voz en la pared: "El primer número es 6."'},
+ f2:{n:'Susurro 2',d:'Una voz en el suelo: "El segundo número es 1."'},
+ f3:{n:'Susurro 3',d:'Una voz tras de ti: "El último número es 8."'},
+ pagA:{n:'Diario: pág. 1',d:'"Para abrir la salida: palanca 3, luego 1, luego 2. Así fue como me atrapó."'},
+ pagB:{n:'Diario: pág. 9',d:'"Yo soy quien nunca salió de este edificio. Y tú también escribes este diario."'}
+};
+
+/* ===== 3. CAPÍTULOS: rooms=habitaciones [x,y,ancho,alto], obs=muebles, doors=puertas, items=objetos (posición en baldosas) ===== */
+const CH=[
+{name:'EL DESPERTAR',desc:'Despiertas en una habitación abandonada. Encuentra una linterna y una llave.',
+ intro:'Despiertas sobre un suelo frío. No recuerdas cómo llegaste. En la mesa hay una nota: "NO DEBISTE REGRESAR."',
+ rooms:[[2,2,10,8],[13,4,12,3],[26,2,10,8]],obs:[[3,3,3,2],[9,7,2,2]],
+ doors:[{x:12,y:5,kind:'key'},{x:25,y:5,kind:'code',code:'1403'}],start:[4,7],
+ items:[{id:'nota',x:3,y:6},{id:'linterna',x:8,y:7},{id:'llave',x:6,y:3,hid:'linterna'},{id:'foto',x:18,y:5},{id:'cinta',x:33,y:3},{id:'exit',x:34,y:8,type:'exit',need:'cinta',n:'Escotilla'}]},
+{name:'LAS VOCES',desc:'Nuevas habitaciones, mensajes ocultos y sonidos que parecen seguirte.',
+ intro:'Bajas al sótano. Las paredes susurran. Tres voces guardan un código. Algo camina por el pasillo...',
+ rooms:[[2,8,8,6],[10,10,24,1],[12,3,6,5],[14,8,2,2],[22,3,6,5],[24,8,2,2],[31,11,2,2],[29,13,5,6],[35,9,4,3]],obs:[[3,9,2,2]],
+ doors:[{x:34,y:10,kind:'code',code:'618'}],start:[4,10],cr:['g',22,10],
+ items:[{id:'f1',x:15,y:3},{id:'f2',x:25,y:4},{id:'f3',x:31,y:17},{id:'exit',x:37,y:10,type:'exit',n:'Escalera'}]},
+{name:'LA VERDAD',desc:'Descubre el origen del misterio y resuelve el último acertijo.',
+ intro:'El último piso. Aquí comenzó todo. Algo te observa y no quiere que escapes.',
+ rooms:[[2,3,7,6],[9,5,3,2],[12,2,16,10],[28,6,3,1],[31,3,7,8]],obs:[[16,5,2,2],[22,7,2,2]],
+ doors:[{x:30,y:6,kind:'lever'}],start:[4,6],cr:['h',20,4],
+ items:[{id:'pagA',x:4,y:4},{id:'l1',x:13,y:3,type:'lever',n:'Palanca 1',num:1},{id:'l2',x:26,y:3,type:'lever',n:'Palanca 2',num:2},{id:'l3',x:26,y:10,type:'lever',n:'Palanca 3',num:3},{id:'pagB',x:35,y:9},{id:'exit',x:36,y:5,type:'exit',need:'pagB',n:'Puerta final'}]}
+];
+
+/* ===== 4. PROGRESO (localStorage): se guarda como texto JSON en el navegador ===== */
+const KEY='tlc_save_v1';
+function fresh(){return{unlocked:1,ch:0,inv:[],taken:[],opened:[],sound:true,flash:true}}
+let S;try{S=Object.assign(fresh(),JSON.parse(localStorage.getItem(KEY)))}catch(e){S=fresh()}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+
+/* ===== 5. VARIABLES DE ESTADO (G): todo lo que cambia mientras se juega ===== */
+const G={run:false,paused:true,pm:false,c:0,map:[],px:0,py:0,fx:0,fy:1,dark:0,flick:0,cf:null,cft:0,seq:[],ev:10,step:0,cr:null,t:0,near:null,kp:'',mt:0};
+const K={};   // teclas presionadas
+
+/* ===== 6. SONIDO (Web Audio API): sonidos creados por código, sin archivos ===== */
+let AC=null,drG=null;
+function snd(f,d,type,v,to){if(!S.sound)return;try{AC=AC||new AudioContext();const o=AC.createOscillator(),g=AC.createGain(),n=AC.currentTime;
+ o.type=type||'sine';o.frequency.setValueAtTime(f,n);if(to)o.frequency.exponentialRampToValueAtTime(to,n+d);
+ g.gain.setValueAtTime(v||.1,n);g.gain.exponentialRampToValueAtTime(.0001,n+d);o.connect(g);g.connect(AC.destination);o.start();o.stop(n+d)}catch(e){}}
+function noise(d,v){if(!S.sound)return;try{AC=AC||new AudioContext();const n=AC.sampleRate*d,b=AC.createBuffer(1,n,AC.sampleRate),a=b.getChannelData(0);
+ for(let i=0;i<n;i++)a[i]=(Math.random()*2-1)*(1-i/n);const s=AC.createBufferSource(),g=AC.createGain();g.gain.value=v;s.buffer=b;s.connect(g);g.connect(AC.destination);s.start()}catch(e){}}
+function drone(){try{AC=AC||new AudioContext();if(!drG){const o=AC.createOscillator(),o2=AC.createOscillator();drG=AC.createGain();o.frequency.value=48;o2.frequency.value=51;o.connect(drG);o2.connect(drG);drG.connect(AC.destination);o.start();o2.start()}drG.gain.value=S.sound?.05:0}catch(e){}}
+
+/* ===== 7. MENSAJES E INVENTARIO ===== */
+function msg(t,ms){const m=$('msg');m.textContent=t;m.style.opacity=1;clearTimeout(G.mt);G.mt=setTimeout(()=>m.style.opacity=0,ms||3500)}
+function renderInv(){$('inv').style.display=G.run?'flex':'none';
+ $('inv').innerHTML='<b>INVENTARIO:</b>'+(S.inv.map(id=>`<span onclick="msg(IT['${id}'].d,7000)">${IT[id].n}</span>`).join('')||' <i>vacío</i>')}
+function ui(h){$('ui').innerHTML=h;$('ui').className='on'}
+function closeUI(){$('ui').className=''}
+
+/* ===== 8. MAPA: se crea con ciclos (for): primero todo pared, luego se "excavan" habitaciones ===== */
+function buildMap(c){const d=CH[c],m=[];                 // 0=suelo 1=pared 2=puerta cerrada 3=mueble
+ for(let y=0;y<MH;y++)m.push(new Array(MW).fill(1));
+ d.rooms.forEach(r=>{for(let y=r[1];y<r[1]+r[3];y++)for(let x=r[0];x<r[0]+r[2];x++)m[y][x]=0});
+ d.obs.forEach(r=>{for(let y=r[1];y<r[1]+r[3];y++)for(let x=r[0];x<r[0]+r[2];x++)m[y][x]=3});
+ d.doors.forEach((o,i)=>{m[o.y][o.x]=S.opened.includes(c+':d'+i)?0:2});
+ return m}
+
+/* ===== 9. COLISIONES: ¿la posición (x,y) cae sobre algo sólido? ===== */
+function solid(x,y){const tx=Math.floor(x/T),ty=Math.floor(y/T);return tx<0||ty<0||tx>=MW||ty>=MH||G.map[ty][tx]>0}
+function hit(x,y,r=4){return solid(x-r,y-r)||solid(x+r,y-r)||solid(x-r,y+r)||solid(x+r,y+r)} // revisa las 4 esquinas
+
+/* ===== 10. INICIO DE CAPÍTULO / PARTIDA ===== */
+function startChapter(c,reset){closeUI();
+ if(reset){S.taken=S.taken.filter(k=>!k.startsWith(c+':'));S.opened=S.opened.filter(k=>!k.startsWith(c+':'));S.inv=S.inv.filter(id=>!CH[c].items.some(i=>i.id==id))}
+ S.ch=c;save();const d=CH[c];G.c=c;G.map=buildMap(c);G.px=d.start[0]*T+8;G.py=d.start[1]*T+8;
+ G.seq=[];G.dark=0;G.flick=0;G.cf=null;G.cft=0;G.ev=8;G.pm=false;
+ G.cr=d.cr?{k:d.cr[0],x:d.cr[1]*T+8,y:d.cr[2]*T+8}:null;G.run=true;G.paused=true;renderInv();drone();
+ ui(`<h2>CAPÍTULO ${c+1}</h2><h1>${d.name}</h1><p>${d.intro}</p><button onclick="go()">ENTRAR</button>`)}
+function go(){closeUI();G.paused=false}
+function newGame(){S=fresh();save();startChapter(0,true)}
+function cont(){startChapter(S.ch,false)}
+
+/* ===== 11. INTERACCIÓN: recoger objetos, abrir puertas, palancas ===== */
+function near(){let best=null,bd=22;
+ CH[G.c].items.forEach(it=>{if(S.taken.includes(G.c+':'+it.id))return;if(it.hid&&!S.inv.includes(it.hid))return;
+  const d=Math.hypot(it.x*T+8-G.px,it.y*T+8-G.py);if(d<bd){bd=d;best={k:'i',o:it}}});
+ CH[G.c].doors.forEach((o,i)=>{if(S.opened.includes(G.c+':d'+i))return;const d=Math.hypot(o.x*T+8-G.px,o.y*T+8-G.py);if(d<bd+4){bd=d;best={k:'d',i}}});
+ return best}
+function interact(){const n=G.near;if(!n)return;if(n.k=='d')useDoor(n.i);else useItem(n.o)}
+function openDoor(i){const o=CH[G.c].doors[i];S.opened.push(G.c+':d'+i);G.map[o.y][o.x]=0;snd(120,.5,'square',.12,60);save()}
+function useDoor(i){const o=CH[G.c].doors[i];
+ if(o.kind=='key'){if(S.inv.includes('llave')){openDoor(i);msg('La llave gira. La puerta cede.')}else{snd(90,.2,'square');msg('Cerrada con llave.')}}
+ else if(o.kind=='code')keypad(i);
+ else{snd(90,.2,'square');msg('Un mecanismo la mantiene cerrada... hay palancas en esta sala.')}}
+function useItem(it){
+ if(it.type=='exit'){if(it.need&&!S.inv.includes(it.need)){msg('Aún falta algo por descubrir antes de salir.');return}chapterDone();return}
+ if(it.type=='lever'){const want=[3,1,2];G.seq.push(it.num);snd(200,.15,'square');
+  if(G.seq[G.seq.length-1]!=want[G.seq.length-1]){G.seq=[];noise(.4,.1);msg('Un chirrido metálico... las palancas vuelven a su lugar.')}
+  else if(G.seq.length==3){openDoor(0);msg('Algo se abre en el fondo de la sala.')}else msg('Clic. La palanca queda abajo.');return}
+ S.taken.push(G.c+':'+it.id);if(!S.inv.includes(it.id))S.inv.push(it.id);
+ snd(600,.15,'triangle');msg('Recogiste: '+IT[it.id].n+' — '+IT[it.id].d,6000);renderInv();save();
+ if(it.id=='llave')scare()}
+
+/* ===== 12. ACERTIJO: teclado numérico ===== */
+function keypad(i){G.paused=true;G.kp='';G.ki=i;const L=CH[G.c].doors[i].code.length;
+ let b='';for(const n of [1,2,3,4,5,6,7,8,9,0])b+=`<button onclick="kpP(${n})">${n}</button>`; // ciclo for...of
+ ui(`<h2>TECLADO</h2><div id="kd">${'_'.repeat(L)}</div><div class="pad">${b}</div><button onclick="kpOK()">ACEPTAR</button><button onclick="kpX()">CANCELAR</button>`)}
+function kpShow(){const L=CH[G.c].doors[G.ki].code.length;$('kd').textContent=(G.kp+'_'.repeat(L)).slice(0,L)}
+function kpP(n){if(G.kp.length<CH[G.c].doors[G.ki].code.length){G.kp+=n;snd(500,.06,'square',.05);kpShow()}}
+function kpX(){closeUI();G.paused=false}
+function kpOK(){if(G.kp==CH[G.c].doors[G.ki].code){closeUI();G.paused=false;openDoor(G.ki);msg('CÓDIGO CORRECTO. La puerta se desbloquea.')}
+ else{G.kp='';snd(110,.4,'sawtooth',.1);$('kd').textContent='ERROR'}}
+
+/* ===== 13. TERROR: evento especial + eventos aleatorios ===== */
+function scare(){G.dark=1.4;snd(60,1.2,'sawtooth',.1,30);msg('Las luces se apagan...',2500);
+ setTimeout(()=>{if(!G.run)return;G.cf={x:G.px-G.fx*30,y:G.py-G.fy*30};G.cft=.7;snd(900,.5,'sawtooth',.14,80);noise(.5,.2);msg('"NO DEBISTE REGRESAR."',4000)},1400)}
+const WH=['Alguien susurra tu nombre.','Escuchas respirar detrás de ti.','Las paredes parecen más cerca.','"Ya estuviste aquí antes."','Silencio... demasiado silencio.'];
+function randomEvent(){const r=Math.random();
+ if(r<.25){for(let i=0;i<4;i++)setTimeout(()=>noise(.06,.07),i*380)}
+ else if(r<.5){noise(.5,.12);snd(80,.5,'square',.06,50);msg('Una puerta se cerró en algún lugar.')}
+ else if(r<.7){G.flick=1.3;snd(50,.3,'sawtooth',.05)}
+ else if(r<.88)msg(WH[Math.floor(Math.random()*WH.length)],3000);
+ else if(G.c>0){G.cf={x:G.px-G.fx*45,y:G.py-G.fy*45};G.cft=.6;snd(300,.4,'sawtooth',.06,60)}}
+
+/* ===== 14. FIN DE CAPÍTULO, DERROTA, PAUSA, MENÚS ===== */
+function chapterDone(){G.paused=true;S.unlocked=Math.max(S.unlocked,Math.min(3,G.c+2));S.ch=Math.min(2,G.c+1);save();snd(440,.8,'triangle',.1,880);
+ if(G.c<2)ui(`<h2>CAPÍTULO ${G.c+1} COMPLETADO</h2><h1>VICTORIA</h1><p>Has descubierto una pieza más de la historia.</p><button onclick="startChapter(${G.c+1},true)">SIGUIENTE CAPÍTULO</button><button onclick="toMenu()">MENÚ PRINCIPAL</button>`);
+ else ui(`<h2>FINAL</h2><h1>LA VERDAD</h1><p>Cruzas la puerta... y despiertas otra vez en la habitación. Eras tú quien escribía el último capítulo. Algunas historias nunca deberían terminar.</p><button onclick="toMenu()">MENÚ PRINCIPAL</button>`)}
+function lose(){if(G.paused)return;G.paused=true;snd(100,1,'sawtooth',.15,30);noise(.6,.2);ui(`<h1>HAS CAÍDO</h1><p>La sombra te alcanzó.</p><button onclick="startChapter(${G.c},false)">REINTENTAR</button><button onclick="toMenu()">MENÚ PRINCIPAL</button>`)}
+function pause(){G.paused=true;G.pm=true;pmenu()}
+function pmenu(){ui(`<h1>PAUSA</h1><button onclick="resume()">CONTINUAR</button><button onclick="startChapter(G.c,true)">REINICIAR</button><button onclick="toMenu()">VOLVER AL MENÚ</button><button onclick="config(true)">CONFIGURACIÓN</button>`)}
+function resume(){G.pm=false;G.paused=false;closeUI()}
+function toMenu(){G.run=false;G.pm=false;renderInv();title()}
+function title(){ui(`<h1>THE LAST CHAPTER</h1><p class="q">Algunas historias nunca deberían terminar.</p><button onclick="newGame()">NUEVA PARTIDA</button><button onclick="cont()">CONTINUAR</button><button onclick="chapters()">SELECCIONAR CAPÍTULO</button><button onclick="config(false)">CONFIGURACIÓN</button><button onclick="credits()">CRÉDITOS</button>`)}
+function chapters(){let h='<h2>SELECCIONAR CAPÍTULO</h2><div class="cards">';
+ CH.forEach((c,i)=>{const ok=i<S.unlocked;h+=`<div class="card"><div class="img">${ok?['I','II','III'][i]:'🔒'}</div><b>CAPÍTULO ${i+1}: ${c.name}</b><p style="font-size:12px">${c.desc}</p><i>${ok?'DISPONIBLE':'BLOQUEADO'}</i><br><button style="min-width:140px" ${ok?'':'disabled'} onclick="startChapter(${i},true)">COMENZAR</button></div>`});
+ ui(h+'</div><button onclick="title()">VOLVER</button>')}
+function config(fp){ui(`<h2>CONFIGURACIÓN</h2><button onclick="S.sound=!S.sound;save();drone();config(${fp})">SONIDO: ${S.sound?'SÍ':'NO'}</button><button onclick="S.flash=!S.flash;save();config(${fp})">DESTELLOS: ${S.flash?'NORMALES':'REDUCIDOS'}</button><button onclick="${fp?'pmenu()':'title()'}">VOLVER</button>`)}
+function credits(){ui(`<h2>CRÉDITOS</h2><p>Videojuego desarrollado por:<br><b>Villamar Guevara Iker Adriel</b><br><br>Asignatura: Fundamentos de Programación I<br>Instituto Superior Tecnológico para el Desarrollo ISPADE<br>Docente: Ing. José Luis Enríquez</p><button onclick="title()">VOLVER</button>`)}
+
+/* ===== 15. TECLADO: eventos de teclas ===== */
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(K[k])return;K[k]=true;
+ if(k=='escape'&&G.run){if(G.pm)resume();else if(!G.paused)pause()}
+ if(k=='e'&&G.run&&!G.paused)interact()});
+addEventListener('keyup',e=>K[e.key.toLowerCase()]=false);
+if('ontouchstart' in window||navigator.maxTouchPoints>0){$('touch').style.display='flex';   // controles táctiles
+ const mk=(el,arr)=>arr.forEach(([t,k])=>{const b=document.createElement('div');b.className='tb';b.textContent=t;
+  b.onpointerdown=ev=>{ev.preventDefault();K[k]=true;if(k=='e'&&G.run&&!G.paused)interact()};b.onpointerup=b.onpointerleave=()=>K[k]=false;$(el).appendChild(b)});
+ mk('tl',[['◀','a'],['▲','w'],['▼','s'],['▶','d']]);mk('tr',[['⚡','shift'],['E','e']])}
+
+/* ===== 16. ACTUALIZACIÓN: se ejecuta ~60 veces por segundo (movimiento del personaje) ===== */
+function update(dt){
+ let dx=((K.d||K.arrowright)?1:0)-((K.a||K.arrowleft)?1:0),dy=((K.s||K.arrowdown)?1:0)-((K.w||K.arrowup)?1:0);
+ if(dx||dy){const n=Math.hypot(dx,dy),sp=(K.shift?2:1.2)*dt;dx=dx/n*sp;dy=dy/n*sp;G.fx=dx/sp;G.fy=dy/sp;
+  if(!hit(G.px+dx,G.py))G.px+=dx;if(!hit(G.px,G.py+dy))G.py+=dy;   // cada eje por separado: así se desliza por las paredes
+  G.step-=dt;if(G.step<=0){noise(.06,.05);G.step=K.shift?14:22}}
+ G.dark=Math.max(0,G.dark-dt/60);G.flick=Math.max(0,G.flick-dt/60);G.cft=Math.max(0,G.cft-dt/60);
+ G.ev-=dt/60;if(G.ev<=0){randomEvent();G.ev=12+Math.random()*14}
+ const c=G.cr;if(c){const ex=G.px-c.x,ey=G.py-c.y,d=Math.hypot(ex,ey)||1;
+  if(c.k=='g'){if(d>44){c.x+=ex/d*.3*dt;c.y+=ey/d*.3*dt}else{noise(.4,.12);snd(70,.6,'sawtooth',.08);msg('Algo pasó rozándote y se esfumó...');c.x=(G.px<22*T?30:14)*T;c.y=10*T+8}}
+  else if(d<150){const sx=ex/d*.6*dt,sy=ey/d*.6*dt;if(!hit(c.x+sx,c.y,4))c.x+=sx;if(!hit(c.x,c.y+sy,4))c.y+=sy;if(d<9)lose()}}
+ G.near=near();$('prompt').style.display=G.near?'block':'none'}
+
+/* ===== 17. DIBUJO: escenario, objetos, jugador, oscuridad y efectos VHS ===== */
+function figure(x,y){ctx.fillStyle='#050505';ctx.fillRect(x-5,y-14,10,22);ctx.fillRect(x-4,y-18,8,6);ctx.fillStyle='#d22';ctx.fillRect(x-3,y-16,2,2);ctx.fillRect(x+1,y-16,2,2)}
+function drawWorld(cx,cy){
+ for(let ty=Math.floor(cy/T);ty<=Math.ceil((cy+H)/T);ty++)for(let tx=Math.floor(cx/T);tx<=Math.ceil((cx+W)/T);tx++){
+  if(tx<0||ty<0||tx>=MW||ty>=MH)continue;const v=G.map[ty][tx],x=tx*T-cx,y=ty*T-cy,n=(tx*7+ty*13)%4;
+  if(v==0){ctx.fillStyle=['#2b2824','#2f2b26','#27241f','#2d2923'][n];ctx.fillRect(x,y,T,T);ctx.fillStyle='#1e1c18';ctx.fillRect(x,y+T-1,T,1)}
+  else if(v==1){ctx.fillStyle='#17171c';ctx.fillRect(x,y,T,T);ctx.fillStyle='#0e0e12';ctx.fillRect(x,y+7,T,1);ctx.fillRect(x+(n*4),y,1,7)}
+  else if(v==2){ctx.fillStyle='#4a3020';ctx.fillRect(x,y,T,T);ctx.fillStyle='#a22';ctx.fillRect(x+6,y+6,4,4)}
+  else{ctx.fillStyle='#3a2a1c';ctx.fillRect(x,y,T,T);ctx.fillStyle='#241810';ctx.fillRect(x+1,y+1,T-2,T-2)}}
+ CH[G.c].items.forEach(it=>{if(S.taken.includes(G.c+':'+it.id))return;if(it.hid&&!S.inv.includes(it.hid))return;
+  const x=it.x*T-cx+4,y=it.y*T-cy+4,p=.6+.4*Math.sin(G.t*4);
+  ctx.fillStyle=it.type=='exit'?`rgba(60,200,90,${p})`:it.type=='lever'?`rgba(230,140,30,${p})`:`rgba(235,220,150,${p})`;ctx.fillRect(x,y,8,8)});
+ if(G.cr)figure(G.cr.x-cx,G.cr.y-cy);if(G.cft>0&&G.cf)figure(G.cf.x-cx,G.cf.y-cy);
+ ctx.fillStyle='#8a8f9a';ctx.fillRect(G.px-cx-4,G.py-cy-4,8,8);ctx.fillStyle='#c9b08a';ctx.fillRect(G.px-cx-3,G.py-cy-7,6,4)} // jugador
+function draw(){ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+ if(!G.run){ctx.fillStyle='#08080b';ctx.fillRect(60,50,264,166);for(let i=0;i<5;i++)for(let j=0;j<3;j++){ctx.fillStyle=(Math.sin(G.t*3+i*j*7)>.9)?'#d9c27a':'#15151a';ctx.fillRect(80+i*50,70+j*45,16,22)}}
+ else{const cx=Math.max(0,Math.min(MW*T-W,G.px-W/2)),cy=Math.max(0,Math.min(MH*T-H,G.py-H/2));drawWorld(cx,cy);
+  const lit=S.inv.includes('linterna');let r=lit?95:38;if(G.flick>0&&Math.random()<(S.flash?.5:.15))r*=.4;if(G.dark>0)r=0;
+  dctx.globalCompositeOperation='source-over';dctx.clearRect(0,0,W,H);dctx.fillStyle='rgba(0,0,0,.96)';dctx.fillRect(0,0,W,H);
+  if(r>0){dctx.globalCompositeOperation='destination-out';const g=dctx.createRadialGradient(G.px-cx,G.py-cy,4,G.px-cx,G.py-cy,r);
+   g.addColorStop(0,'rgba(0,0,0,1)');g.addColorStop(.6,'rgba(0,0,0,.75)');g.addColorStop(1,'rgba(0,0,0,0)');dctx.fillStyle=g;dctx.fillRect(0,0,W,H)}
+  ctx.drawImage(dk,0,0);
+  if(G.cft>0&&S.flash){ctx.fillStyle='rgba(110,0,0,.22)';ctx.fillRect(0,0,W,H)}}
+ ctx.fillStyle='rgba(255,255,255,.035)';ctx.fillRect(0,(G.t*50)%H,W,6);                      // banda VHS
+ for(let i=0;i<70;i++){ctx.fillStyle='rgba(200,200,200,.07)';ctx.fillRect(Math.random()*W,Math.random()*H,1,1)} // grano
+ const v=ctx.createRadialGradient(W/2,H/2,H/3,W/2,H/2,W*.65);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(0,0,0,.6)');ctx.fillStyle=v;ctx.fillRect(0,0,W,H)}
+
+/* ===== 18. BUCLE PRINCIPAL: repite update() y draw() continuamente ===== */
+let last=0;
+function loop(t){const dt=Math.min(2,(t-last)/16.67||1);last=t;G.t+=dt/60;if(G.run&&!G.paused)update(dt);draw();requestAnimationFrame(loop)}
+title();requestAnimationFrame(loop);
+</script></body></html>
